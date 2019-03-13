@@ -36,7 +36,7 @@ public:
 	/// The threads will not be started the moment the pool is initialized, 
 	/// to start the threads, Start_All_Threads or Start_N_Threads must be invoked.
 	///</remarks>
-	ThreadPool(std::size_t _nthreads = 0, std::chrono::milliseconds _sleep_duration = std::chrono::duration<int, std::milli>(10))
+	ThreadPool(std::size_t _nthreads = 0, std::chrono::microseconds _sleep_duration = std::chrono::duration<int, std::micro>(100))
 	{
 		// threads must be started explicitly
 		m_nrunning = 0;
@@ -121,13 +121,19 @@ public:
 		{
 			m_threads.reserve(_n);
 
+			m_jobs_mtx.lock();
+			m_signals_mtx.lock();
 			for (auto i = m_nrunning; i < _n; i++)
 			{
 				m_signals.push_back(THREAD_SIGNALS::STARTING);
+				m_jobs_worked.push_back(0);
 				m_threads.push_back(std::thread(Idle, this, i));
 			} // end for i
 
 			m_nrunning = m_threads.size();
+
+			m_jobs_mtx.unlock();
+			m_signals_mtx.unlock();
 		} // end if
 
 		return true;
@@ -236,6 +242,14 @@ public:
 		return std::vector<THREAD_SIGNALS>(m_signals);
 	} // end method Thread_States
 
+
+	std::vector<std::size_t> Thread_Stats(void)
+	{
+		Guard_t guard(m_signals_mtx);
+
+		return std::vector<std::size_t>(m_jobs_worked);
+	}
+
 protected:
 	///<summary>
 	/// Thread main function. Threads will idle until work is available 
@@ -258,16 +272,29 @@ protected:
 			if (job != nullptr)
 			{
 				_my_pool->m_signals_mtx.lock();
-				_my_pool->m_signals[_my_id] = THREAD_SIGNALS::WORKING;
-				_my_pool->m_signals_mtx.unlock();
-				job->Execute();
+				if (_my_pool->m_signals[_my_id] != THREAD_SIGNALS::SIGTERM)
+				{
+					_my_pool->m_signals[_my_id] = THREAD_SIGNALS::WORKING;
+					_my_pool->m_jobs_worked[_my_id] += 1;
+					_my_pool->m_signals_mtx.unlock();
+					job->Execute();
+				} // end if
+				else
+				{	// thread has been instructed to terminate
+					_my_pool->m_signals_mtx.unlock();
+				} // end else
 
 				delete job;
 			} // end if
 			else
 			{
 				_my_pool->m_signals_mtx.lock();
-				_my_pool->m_signals[_my_id] = THREAD_SIGNALS::IDLE;
+
+				if (_my_pool->m_signals[_my_id] != THREAD_SIGNALS::SIGTERM)
+				{
+					_my_pool->m_signals[_my_id] = THREAD_SIGNALS::IDLE;
+				} // end if
+
 				_my_pool->m_signals_mtx.unlock();
 				std::this_thread::sleep_for(_my_pool->m_sleep_duration);
 			} // end else
@@ -288,11 +315,12 @@ protected:
 
 
 private:	
-	std::chrono::milliseconds m_sleep_duration;
+	std::chrono::microseconds m_sleep_duration;
 	std::size_t m_nthreads;
 	std::size_t m_nrunning;
 	std::vector<std::thread> m_threads;
 	std::vector<THREAD_SIGNALS> m_signals;
+	std::vector<std::size_t> m_jobs_worked;
 	mutable std::mutex m_jobs_mtx;
 	mutable std::mutex m_signals_mtx;
 	JobQueue m_jobs;
