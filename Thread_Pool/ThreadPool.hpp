@@ -126,7 +126,6 @@ public:
 			for (auto i = m_nrunning; i < _n; i++)
 			{
 				m_signals.push_back(THREAD_SIGNALS::STARTING);
-				m_jobs_worked.push_back(0);
 				m_threads.push_back(std::thread(Idle, this, i));
 			} // end for i
 
@@ -313,14 +312,12 @@ protected:
 				if (_my_pool->m_signals[_my_id] != THREAD_SIGNALS::SIGTERM)
 				{
 					_my_pool->m_signals[_my_id] = THREAD_SIGNALS::WORKING;
-					_my_pool->m_jobs_worked[_my_id] += 1;
 					_my_pool->m_signals_mtx.unlock();
 					job->Execute();
 				} // end if
 				else
 				{	// thread has been instructed to terminate
 					_my_pool->m_signals_mtx.unlock();
-					_my_pool->m_jobs_worked[_my_id] += 1;
 					job->Execute();
 				} // end else
 
