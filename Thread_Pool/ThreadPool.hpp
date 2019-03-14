@@ -256,45 +256,30 @@ public:
 	} // end method Synchronize
 
 
-	void Progress_Bar(std::size_t total_jobs, std::chrono::high_resolution_clock::time_point& start)
-	{
-		constexpr std::size_t slots = 50;
-		float progress = (static_cast<float>(total_jobs - m_jobs.Size())) / static_cast<float>(total_jobs);
-		int current = static_cast<int>(progress * static_cast<float>(slots));
-		std::cout << "\t\tProgress: [";
-
-		for (auto i = 0; i < slots; i++)
-		{
-			if (i < current)
-			{
-				std::cout << "=";
-			} // end if
-			else if (i == current)
-			{
-				std::cout << ">";
-			} // end elif
-			else
-			{
-				std::cout << " ";
-			} // end else
-		} // end for i
-		std::cout << "] " << static_cast<int>(progress * 100) << "% -- Time: " << chrono_duration<std::chrono::seconds>(start, _Clock::now()) << "s\r";
-		std::cout.flush();
-	} // end method Progress_Bar
-
-
+	///<summary>
+	/// Accessor for the number of threads running.
+	///</summary>
+	///<returns>The number of threads currently running.</returns>
 	std::size_t N_Threads_Running(void)
 	{
 		return m_nrunning;
 	} // end method N_Threads_Running
 
 
+	///<summary>
+	/// Accessor for the number of jobs not completed.
+	///</summary>
+	///<returns>The number of jobs that remain in the queue.</returns>
 	std::size_t N_Jobs_Remaining(void)
 	{
 		return m_jobs.Size();
 	} // end method N_Jobs_Remaining
 
 
+	///<summary>
+	/// Returns a list of all threads and their current states at the time of invocation.
+	///</summary>
+	///<returns>A vector of all thread states.</returns>
 	std::vector<THREAD_SIGNALS> Thread_States(void)
 	{
 		Guard_t guard(m_signals_mtx);
@@ -302,13 +287,6 @@ public:
 		return std::vector<THREAD_SIGNALS>(m_signals);
 	} // end method Thread_States
 
-
-	std::vector<std::size_t> Thread_Stats(void)
-	{
-		Guard_t guard(m_signals_mtx);
-
-		return std::vector<std::size_t>(m_jobs_worked);
-	} // end method Thread_Stats
 
 protected:
 	///<summary>
@@ -376,13 +354,44 @@ protected:
 	} // end method Idle
 
 
+	///<summary>
+	/// Prints a fancy progress bar with percentage completed and time elapsed in seconds.
+	///</summary>
+	///<param name="total_jobs">The total number of jobs.</param>
+	///<param name="start">Start time.</param>
+	void Progress_Bar(std::size_t total_jobs, std::chrono::high_resolution_clock::time_point& start)
+	{
+		constexpr std::size_t slots = 50;
+		float progress = (static_cast<float>(total_jobs - m_jobs.Size())) / static_cast<float>(total_jobs);
+		int current = static_cast<int>(progress * static_cast<float>(slots));
+		std::cout << "\t\tProgress: [";
+
+		for (auto i = 0; i < slots; i++)
+		{
+			if (i < current)
+			{
+				std::cout << "=";
+			} // end if
+			else if (i == current)
+			{
+				std::cout << ">";
+			} // end elif
+			else
+			{
+				std::cout << " ";
+			} // end else
+		} // end for i
+		std::cout << "] " << static_cast<int>(progress * 100) << "% -- Time: " << chrono_duration<std::chrono::seconds>(start, _Clock::now()) << "s\r";
+		std::cout.flush();
+	} // end method Progress_Bar
+
+
 private:	
 	std::chrono::microseconds m_sleep_duration;
 	std::size_t m_nthreads;
 	std::size_t m_nrunning;
 	std::vector<std::thread> m_threads;
 	std::vector<THREAD_SIGNALS> m_signals;
-	std::vector<std::size_t> m_jobs_worked;
 	mutable std::mutex m_jobs_mtx;
 	mutable std::mutex m_signals_mtx;
 	JobQueue m_jobs;

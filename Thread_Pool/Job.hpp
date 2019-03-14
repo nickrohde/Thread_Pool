@@ -51,19 +51,18 @@ public:
 	///</summary>
 	virtual void Execute(void)
 	{
-		switch (m_is_valid)
+		if (m_is_valid)
 		{
-		case true:
 			m_bound_function();
-			break;
-		default:
+		} // end if
+		else
+		{
 			throw std::invalid_argument("Function was not provided before Execute was invoked!");
-		} // end switch
+		} // end else
 	} // end method Execute
 
 
 private:
-	std::function<ReturnType(Args...)> m_my_function;
 	std::function<ReturnType(void)> m_bound_function;
 	bool m_is_valid;
 }; // end class Job
