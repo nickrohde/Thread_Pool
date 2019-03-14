@@ -208,7 +208,7 @@ public:
 	/// True on successful completion of all pending jobs.
 	/// False if no threads are running.
 	///</returns>
-	bool Synchronize(void)
+	bool Synchronize(bool show_progress = false)
 	{
 		if (m_nrunning == 0)
 		{
@@ -216,11 +216,27 @@ public:
 			return false;
 		} // end if
 
+		std::size_t total_jobs = m_jobs.Size();
+		auto start = _Clock::now();
+
+		if (show_progress) 
+		{
+			std::cout << "[Thread Pool]: Synchronizing ..." << std::endl;
+		} // end if
 		// wait for all jobs to be assigned to a thread
 		while (!m_jobs.Empty())
 		{
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			if (show_progress) 
+			{
+				Progress_Bar(total_jobs, start);
+			} // end if
 		} // end while		
+
+		if (show_progress)
+		{
+			std::cout << std::endl;
+		} // end if
 
 		// wait for all threads to complete their current work
 		for (auto& _signal : m_signals)
@@ -231,8 +247,52 @@ public:
 			} // end while
 		} // end for
 
+		if (show_progress)
+		{
+			std::cout << "[Thread Pool]: Synchronization completed." << std::endl;
+		} // end if
+
 		return true;
 	} // end method Synchronize
+
+
+	void Progress_Bar(std::size_t total_jobs, std::chrono::high_resolution_clock::time_point& start)
+	{
+		constexpr std::size_t slots = 50;
+		float progress = (static_cast<float>(total_jobs - m_jobs.Size())) / static_cast<float>(total_jobs);
+		int current = static_cast<int>(progress * static_cast<float>(slots));
+		std::cout << "\t\tProgress: [";
+
+		for (auto i = 0; i < slots; i++)
+		{
+			if (i < current)
+			{
+				std::cout << "=";
+			} // end if
+			else if (i == current)
+			{
+				std::cout << ">";
+			} // end elif
+			else
+			{
+				std::cout << " ";
+			} // end else
+		} // end for i
+		std::cout << "] " << static_cast<int>(progress * 100) << "% -- Time: " << chrono_duration<std::chrono::seconds>(start, _Clock::now()) << "s\r";
+		std::cout.flush();
+	} // end method Progress_Bar
+
+
+	std::size_t N_Threads_Running(void)
+	{
+		return m_nrunning;
+	} // end method N_Threads_Running
+
+
+	std::size_t N_Jobs_Remaining(void)
+	{
+		return m_jobs.Size();
+	} // end method N_Jobs_Remaining
 
 
 	std::vector<THREAD_SIGNALS> Thread_States(void)
@@ -248,7 +308,7 @@ public:
 		Guard_t guard(m_signals_mtx);
 
 		return std::vector<std::size_t>(m_jobs_worked);
-	}
+	} // end method Thread_Stats
 
 protected:
 	///<summary>
@@ -282,6 +342,8 @@ protected:
 				else
 				{	// thread has been instructed to terminate
 					_my_pool->m_signals_mtx.unlock();
+					_my_pool->m_jobs_worked[_my_id] += 1;
+					job->Execute();
 				} // end else
 
 				delete job;
