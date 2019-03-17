@@ -225,7 +225,8 @@ public:
 		// wait for all jobs to be assigned to a thread
 		while (!m_jobs.Empty())
 		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			//std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			std::this_thread::yield();
 			if (show_progress) 
 			{
 				Progress_Bar(total_jobs, start);
@@ -242,7 +243,8 @@ public:
 		{
 			while (_signal == THREAD_SIGNALS::WORKING) 
 			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				//std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				std::this_thread::yield();
 			} // end while
 		} // end for
 
@@ -333,7 +335,8 @@ protected:
 				} // end if
 
 				_my_pool->m_signals_mtx.unlock();
-				std::this_thread::sleep_for(_my_pool->m_sleep_duration);
+				std::this_thread::yield();
+				//std::this_thread::sleep_for(_my_pool->m_sleep_duration);
 			} // end else
 
 			switch (_my_pool->m_signals.at(_my_id))
