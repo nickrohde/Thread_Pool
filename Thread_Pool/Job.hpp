@@ -1,7 +1,9 @@
 #pragma once
 #include <functional> // function
 
-class Job_Base
+#pragma
+
+class Job_Base 
 {
 public:
 	Job_Base(void) = default;
@@ -15,11 +17,13 @@ public:
 }; // end class Job_Base
 
 
+
+
 template<typename ReturnType, typename ...Args>
-class Job : public Job_Base
-{	
+class Job : public Job_Base 
+{
 public:
-	Job(void) = default;
+	Job(void)  = default;
 	virtual ~Job(void) = default;
 
 
@@ -28,7 +32,7 @@ public:
 	///</summary>
 	///<param name="_f">The function that should be called upon execution of this job.</param>
 	///<param name="args">The function arguments that should be bound to <paramref name="_f" />.</param>
-	Job(std::function<ReturnType(Args...)> _f, Args... args)
+	[[deprecated]] Job(std::function<ReturnType(Args...)> _f, Args... args)
 	{
 		Register_Function(_f, args...);
 	} // end Constructor
@@ -39,7 +43,7 @@ public:
 	///</summary>
 	///<param name="_f">The function that should be called upon execution of this job.</param>
 	///<param name="args">The function arguments that should be bound to <paramref name="_f" />.</param>
-	void Register_Function(std::function<ReturnType(Args...)> _f, Args... args)
+	[[deprecated]] void Register_Function(std::function<ReturnType(Args...)> _f, Args... args)
 	{
 		m_bound_function = std::bind(_f, args...);
 		m_is_valid = true;
@@ -49,7 +53,7 @@ public:
 	///<summary>
 	/// Executes this job.
 	///</summary>
-	virtual void Execute(void)
+	[[deprecated]] virtual void Execute(void)
 	{
 		if (m_is_valid)
 		{
