@@ -8,9 +8,10 @@
 #include <vector>		// vector
 #include <mutex>		// mutex, lock_guard
 #include <iostream>		// cout
-#include "Utility.hpp"	// _Clock
-#include "Job.hpp"	
-#include "JobQueue.hpp"
+#include <queue>		// queue
+#include <future>		// packaged_task
+#include <stdexcept>    // exception
+#include <exception>    // exception_ptr
 
 class ThreadPool
 {
@@ -33,21 +34,21 @@ public:
 
 
 	///<summary>
-	/// Initializes the thread pool to support <paramref name="_nthreads"/> threads.
+	/// Initializes the thread pool to support <paramref name="ku_li_N_THREADS_"/> threads.
 	///</summary>
-	///<param name="_nthreads">The number of threads this pool should support.</param>
+	///<param name="ku_li_N_THREADS_">The number of threads this pool should support.</param>
 	///<remarks>
 	/// The threads will not be started the moment the pool is initialized, 
 	/// to start the threads, Start_All_Threads or Start_N_Threads must be invoked.
 	///</remarks>
-	ThreadPool(std::size_t _nthreads = 0)
+	ThreadPool(const std::size_t ku_li_N_THREADS_)
 	{
 		// threads must be started explicitly
-		m_nrunning = 0;
-		m_nthreads = _nthreads;
-		m_threads.reserve(m_nthreads);
+		mu_li_nrunning = 0;
+		mu_li_nthreads = ku_li_N_THREADS_;
+		m_vect_threads.reserve(mu_li_nthreads);
 	} // end Constructor(1)
-	
+
 
 	///<summary>
 	/// Alerts all threads to terminate, clears the job queue, and then waits for all threads to terminate.
@@ -59,19 +60,19 @@ public:
 	~ThreadPool(void)
 	{
 		// signal all threads to terminate
-		m_signals_mtx.lock();
-		std::for_each(m_signals.begin(), m_signals.end(),
-			[&](auto& sigterm) 
+		m_mtx_signals.lock();
+		std::for_each(m_vect_signals.begin(), m_vect_signals.end(),
+			[&](auto& sigterm)
 			{
-				sigterm = THREAD_SIGNALS::SIGTERM; 
+				sigterm = THREAD_SIGNALS::SIGTERM;
 			} // end lambda
 		); // end foreach
-		m_signals_mtx.unlock();
+		m_mtx_signals.unlock();
 
 		Empty_Job_Queue();
-		
+
 		// wait for all threads to terminate
-		for (auto& t : m_threads)
+		for (auto& t : m_vect_threads)
 		{
 			if (t.joinable())
 			{
@@ -92,50 +93,47 @@ public:
 	///</remarks>
 	bool Start_All_Threads(void)
 	{
-		return Start_N_Threads(m_nthreads);
+		return Start_N_Threads(mu_li_nthreads);
 	} // end method 
 
 
 	///<summary>
-	/// Starts <paramref name="_n"/> threads. These threads will begin executing jobs.
+	/// Starts <paramref name="ku_li_N_THREADS_"/> threads. These threads will begin executing jobs.
 	///</summary>
-	///<param name="_n">The number of threads to start.</param>
+	///<param name="ku_li_N_THREADS_">The number of threads to start.</param>
 	///<returns>
 	/// True on success, false if an issue occurs. 
 	///</returns>
 	///<remarks>
-	/// The value of <paramref name="_n"/> must be at least as large as 
+	/// The value of <paramref name="ku_li_N_THREADS_"/> must be at least as large as 
 	/// the number of running threads in order for this call to succeed.
-	/// By providing an <paramref name="_n"/> value larger than the capacity
+	/// By providing an <paramref name="ku_li_N_THREADS_"/> value larger than the capacity
 	/// of the thread pool, the pool can be grown in size.
 	///</remarks>
-	bool Start_N_Threads(std::size_t _n)
+	bool Start_N_Threads(const std::size_t ku_li_N_THREADS_)
 	{
-		if (_n < m_nrunning)
+		if (ku_li_N_THREADS_ < mu_li_nrunning)
 		{
 			return false;
 		} // end if
-		else if (_n > m_nthreads)
+		else if (ku_li_N_THREADS_ > mu_li_nthreads)
 		{
-			m_nthreads = _n;
+			mu_li_nthreads = ku_li_N_THREADS_;
 		} // end elif
 
-		if (m_nrunning != m_nthreads)
+		if (mu_li_nrunning != mu_li_nthreads)
 		{
-			m_threads.reserve(_n);
+			m_vect_threads.reserve(mu_li_nthreads);
 
-			m_jobs_mtx.lock();
-			m_signals_mtx.lock();
-			for (auto i = m_nrunning; i < _n; i++)
+			m_mtx_signals.lock();
+			for (auto i = mu_li_nrunning; i < mu_li_nthreads; i++)
 			{
-				m_signals.push_back(THREAD_SIGNALS::STARTING);
-				m_threads.push_back(std::thread(Idle, this, i));
+				m_vect_signals.push_back(THREAD_SIGNALS::STARTING);
+				m_vect_threads.push_back(std::thread([&](void) {idle_thread(i); }));
 			} // end for i
 
-			m_nrunning = m_threads.size();
-
-			m_jobs_mtx.unlock();
-			m_signals_mtx.unlock();
+			mu_li_nrunning = m_vect_threads.size();
+			m_mtx_signals.unlock();
 		} // end if
 
 		return true;
@@ -143,53 +141,55 @@ public:
 
 
 	///<summary>
-	/// Adds the given job <paramref name="_job"/> to the end of the execution queue.
+	/// Adds the given job <paramref name="fn_job_"/> to the end of the execution queue.
 	///</summary>
-	///<param name="_job">A ready-to-execute job that should be executed.</param>
-	void Add_Job(Job_Base* _job)
+	///<param name="fn_job_">A ready-to-execute job that should be executed.</param>
+	void Add_Job(std::function<void(void)> fn_job_)
 	{
-		Guard_t guard(m_jobs_mtx);
-		m_jobs.Add_Job(_job);
+		Guard_t guard(m_mtx_tasks);
+
+		m_q_tasks.push(fn_job_);
 	} // end method Add_Job
 
 
 	///<summary>
-	/// Terminates all threads currently running in the thread pool. If <paramref name="wait_to_finish"/> 
+	/// Terminates all threads currently running in the thread pool. If <paramref name="b_SYNC_FIRST_"/> 
 	/// is set, the pool will sychronize before terminating the running threads.
 	///</summary>
-	///<param name="wait_to_finish">Whether or not to block and synchronize before terminating.</param>
+	///<param name="b_SYNC_FIRST_">Whether or not to block and synchronize before terminating.</param>
 	///<remarks>
 	/// The job queue will not be cleared by this function, an explicit call to Empty_Job_Queue is required.
 	///</remarks>
-	void Kill_All(bool wait_to_finish = false)
+	void Kill_All(const bool b_SYNC_FIRST_ = false)
 	{
-		if (wait_to_finish)
+		if (b_SYNC_FIRST_ == true)
 		{
 			Synchronize();
 		} // end if
 
 		// signal all threads to terminate
-		m_signals_mtx.lock();
-		std::for_each(m_signals.begin(), m_signals.end(),
+		m_mtx_signals.lock();
+		std::for_each(m_vect_signals.begin(), m_vect_signals.end(),
 			[&](auto& sigterm)
 			{
 				sigterm = THREAD_SIGNALS::SIGTERM;
 			} // end lambda
 		); // end foreach
-		m_signals_mtx.unlock();
+		m_mtx_signals.unlock();
 
 		// wait for all threads to terminate
-		for (auto& t : m_threads)
+		for (auto& t : m_vect_threads)
 		{
-			if (t.joinable())
+			if (t.joinable() == true)
 			{
 				t.join();
 			} // end if
 		} // end for t
 
-		m_threads.clear();
+		m_vect_threads.clear();
+		m_vect_signals.clear();
 
-		m_nrunning = 0;
+		mu_li_nrunning = 0;
 	} // end method Stop
 
 
@@ -198,8 +198,11 @@ public:
 	///</summary>
 	void Empty_Job_Queue(void)
 	{
-		Guard_t guard(m_jobs_mtx);
-		m_jobs.Clear();
+		Guard_t guard(m_mtx_tasks);
+		while (m_q_tasks.empty() == false)
+		{
+			m_q_tasks.pop();
+		} // end while
 	} // end method Empty_Job_Queue
 
 
@@ -210,51 +213,27 @@ public:
 	/// True on successful completion of all pending jobs.
 	/// False if no threads are running.
 	///</returns>
-	bool Synchronize(bool show_progress = false)
+	bool Synchronize(void) const noexcept
 	{
-		if (m_nrunning == 0)
+		if (mu_li_nrunning == 0)
 		{
 			std::cerr << "ThreadPool::Synchronize invoked with 0 running threads! Did you call Start_All?" << std::endl;
 			return false;
 		} // end if
 
-		std::size_t total_jobs = m_jobs.Size();
-		auto start = _Clock::now();
-
-		if (show_progress) 
+		while (m_q_tasks.empty() == false)
 		{
-			std::cout << "[Thread Pool]: Synchronizing ..." << std::endl;
-		} // end if
-		// wait for all jobs to be assigned to a thread
-		while (!m_jobs.Empty())
-		{
-			//std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			std::this_thread::yield();
-			if (show_progress) 
-			{
-				Progress_Bar(total_jobs, start);
-			} // end if
-		} // end while		
-
-		if (show_progress)
-		{
-			std::cout << std::endl;
-		} // end if
+		} // end while
 
 		// wait for all threads to complete their current work
-		for (auto& _signal : m_signals)
+		for (auto& _signal : m_vect_signals)
 		{
-			while (_signal == THREAD_SIGNALS::WORKING) 
+			while (_signal == THREAD_SIGNALS::WORKING)
 			{
-				//std::this_thread::sleep_for(std::chrono::milliseconds(1));
 				std::this_thread::yield();
 			} // end while
 		} // end for
-
-		if (show_progress)
-		{
-			std::cout << "[Thread Pool]: Synchronization completed." << std::endl;
-		} // end if
 
 		return true;
 	} // end method Synchronize
@@ -264,9 +243,9 @@ public:
 	/// Accessor for the number of threads running.
 	///</summary>
 	///<returns>The number of threads currently running.</returns>
-	std::size_t N_Threads_Running(void)
+	std::size_t N_Threads_Running(void) const noexcept
 	{
-		return m_nrunning;
+		return mu_li_nrunning;
 	} // end method N_Threads_Running
 
 
@@ -274,22 +253,55 @@ public:
 	/// Accessor for the number of jobs not completed.
 	///</summary>
 	///<returns>The number of jobs that remain in the queue.</returns>
-	std::size_t N_Jobs_Remaining(void)
+	std::size_t N_Jobs_Remaining(void) const noexcept
 	{
-		return m_jobs.Size();
+		Guard_t guard(m_q_tasks);
+
+		return m_q_tasks.size();
 	} // end method N_Jobs_Remaining
+
+
+	///<summary>
+	/// Returns whether or not an exception pointer was queued for processing.
+	///</summary>
+	///<returns>True iff there are exceptions waiting for processing, otherwise false.</returns>
+	bool Has_Exceptions(void) const noexcept
+	{
+		Guard_t guard(m_mtx_exception);
+
+		return m_q_exception.empty() == false;
+	} // end method Has_Exceptions
 
 
 	///<summary>
 	/// Returns a list of all threads and their current states at the time of invocation.
 	///</summary>
 	///<returns>A vector of all thread states.</returns>
-	std::vector<THREAD_SIGNALS> Thread_States(void)
+	std::vector<THREAD_SIGNALS> Thread_States(void) const
 	{
-		Guard_t guard(m_signals_mtx);
+		Guard_t guard(m_mtx_signals);
 
-		return std::vector<THREAD_SIGNALS>(m_signals);
+		return std::vector<THREAD_SIGNALS>(m_vect_signals);
 	} // end method Thread_States
+
+
+	///<summary>
+	/// Accessor for the last exception that has occurred, exceptions are returned in order of occurrence.
+	///</summary>
+	///<returns>An exception pointer to the next exception, or a nullptr if no exceptions are queued.</returns>
+	std::exception_ptr Last_Exception(void)
+	{
+		Guard_t guard(m_mtx_exception);
+		std::exception_ptr exptr_exception;
+
+		if (m_q_exception.empty() == false)
+		{
+			exptr_exception = m_q_exception.front();
+			m_q_exception.pop();
+		} // end if
+
+		return exptr_exception;
+	} // end method Last_Exception
 
 
 protected:
@@ -297,106 +309,94 @@ protected:
 	/// Thread main function. Threads will idle until work is available 
 	/// and they have not received a sigterm from the main thread.
 	///</summary>
-	///<param name="_my_pool">The thread pool this thread belongs to.</param>
-	///<param name="_my_id">The id of this thread within the thread pool.</param>
-	static void Idle(ThreadPool* _my_pool, const std::size_t _my_id)
+	///<param name="ku_li_MY_ID_">The id of this thread within the thread pool.</param>
+	void idle_thread(const std::size_t ku_li_MY_ID_)
 	{
-		auto run = true;
+		auto b_run = true;
 
-		while(run)
+		while (b_run == true)
 		{
-			_my_pool->m_jobs_mtx.lock();
+			auto fn_job = get_work(ku_li_MY_ID_);
 
-			auto job = _my_pool->m_jobs.Get_Work();
-
-			_my_pool->m_jobs_mtx.unlock();
-
-			if (job != nullptr)
+			try
 			{
-				_my_pool->m_signals_mtx.lock();
-				if (_my_pool->m_signals[_my_id] != THREAD_SIGNALS::SIGTERM)
-				{
-					_my_pool->m_signals[_my_id] = THREAD_SIGNALS::WORKING;
-					_my_pool->m_signals_mtx.unlock();
-					job->Execute();
-				} // end if
-				else
-				{	// thread has been instructed to terminate
-					_my_pool->m_signals_mtx.unlock();
-					job->Execute();
-				} // end else
-
-				delete job;
-			} // end if
-			else
+				fn_job();
+			} // end try
+			catch (...) // catch any kind of exception and alert the user
 			{
-				_my_pool->m_signals_mtx.lock();
+				Guard_t guard(m_mtx_exception);
+				std::cerr << "[Thread Pool]: An exception occurred while executing a job." << std::endl;
+				m_q_exception.push(std::current_exception);
+			} // end catch all
 
-				if (_my_pool->m_signals[_my_id] != THREAD_SIGNALS::SIGTERM)
-				{
-					_my_pool->m_signals[_my_id] = THREAD_SIGNALS::IDLE;
-				} // end if
-
-				_my_pool->m_signals_mtx.unlock();
-				std::this_thread::yield();
-			} // end else
-
-			switch (_my_pool->m_signals.at(_my_id))
+			switch (m_vect_signals.at(ku_li_MY_ID_))
 			{
-				case THREAD_SIGNALS::SIGTERM:
-					run = false;
-					break;
-				default:
-					break;
+			case THREAD_SIGNALS::SIGTERM:
+				b_run = false;
+				break;
+			default:
+				break;
 			} // end switch
 		} // end while
-		_my_pool->m_signals_mtx.lock();
-		_my_pool->m_signals.at(_my_id) = THREAD_SIGNALS::TERMINATING;
-		_my_pool->m_signals_mtx.unlock();
-	} // end method Idle
+
+		{
+			Guard_t guard(m_mtx_signals);
+			m_vect_signals.at(ku_li_MY_ID_) = THREAD_SIGNALS::TERMINATING;
+		}
+	} // end idle_thread
 
 
 	///<summary>
-	/// Prints a fancy progress bar with percentage completed and time elapsed in seconds.
+	/// Removes and returns the next job from the queue and sets the calling thread's status. 
+	/// If no jobs are queued, the job defaults to yield. 
 	///</summary>
-	///<param name="total_jobs">The total number of jobs.</param>
-	///<param name="start">Start time.</param>
-	void Progress_Bar(std::size_t total_jobs, std::chrono::high_resolution_clock::time_point& start)
+	///<param name="ku_li_MY_ID_">The id of the calling thread within the thread pool.</param>
+	///<returns>A callable function object that the thread should execute.</returns>
+	std::function<void(void)> get_work(const std::size_t ku_li_MY_ID_)
 	{
-		constexpr std::size_t slots = 50;
-		float progress = (static_cast<float>(total_jobs - m_jobs.Size())) / static_cast<float>(total_jobs);
-		int current = static_cast<int>(progress * static_cast<float>(slots));
-		std::cout << "\t\tProgress: [";
+		Guard_t guard(m_mtx_tasks);
 
-		for (auto i = 0; i < slots; i++)
+		std::function<void(void)> job;
+
+		if (m_q_tasks.empty() == false)
 		{
-			if (i < current)
+			job = std::move(m_q_tasks.front());
+			m_q_tasks.pop();
+
+			Guard_t guard(m_mtx_signals);
+			if (m_vect_signals[ku_li_MY_ID_] != THREAD_SIGNALS::SIGTERM)
 			{
-				std::cout << "=";
+				m_vect_signals[ku_li_MY_ID_] = THREAD_SIGNALS::WORKING;
 			} // end if
-			else if (i == current)
+		} // end if
+		else
+		{
+			job = std::this_thread::yield;
+
+			Guard_t guard(m_mtx_signals);
+			if (m_vect_signals[ku_li_MY_ID_] != THREAD_SIGNALS::SIGTERM)
 			{
-				std::cout << ">";
-			} // end elif
-			else
-			{
-				std::cout << " ";
-			} // end else
-		} // end for i
-		std::cout << "] " << static_cast<int>(progress * 100) << "% -- Time: " << chrono_duration<std::chrono::seconds>(start, _Clock::now()) << "s\r";
-		std::cout.flush();
-	} // end method Progress_Bar
+				m_vect_signals[ku_li_MY_ID_] = THREAD_SIGNALS::IDLE;
+			} // end if
+		} // end else
+
+		return job;
+	} // end method get_work
 
 
-private:	
-	std::size_t m_nthreads;
-	std::size_t m_nrunning;
-	std::vector<std::thread> m_threads;
-	std::vector<THREAD_SIGNALS> m_signals;
-	mutable std::mutex m_jobs_mtx;
-	mutable std::mutex m_signals_mtx;
-	JobQueue m_jobs;
-	std::queue<std::packaged_task<void(void)>> m_tasks;
+private:
+	std::size_t mu_li_nthreads;                          //! the number of threads
+	std::size_t mu_li_nrunning;                          //! the number of running threads
+             
+	std::vector<std::thread> m_vect_threads;             //! container storing thread objects
+	std::vector<int>         m_vect_signals;             //! signal vector to communicate with threads
+             
+	mutable std::mutex m_mtx_tasks;                      //! mutex protecting the task queue
+	mutable std::mutex m_mtx_signals;                    //! mutex protecting the signals vector
+	mutable std::mutex m_mtx_exception;                  //! mutex protecting the exception queue
+
+	std::queue<std::function<void(void)>> m_q_tasks;     //! queue storing tasks waiting for execution
+	std::queue<std::exception_ptr>        m_q_exception; //! queue storing exceptions that occurred during execution of past jobs
 
 }; // end class ThreadPool
 
