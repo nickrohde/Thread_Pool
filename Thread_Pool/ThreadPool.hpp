@@ -19,11 +19,11 @@ class ThreadPool
 public:
 	enum THREAD_SIGNALS
 	{
-		STARTING,
-		WORKING,
-		IDLE,
-		SIGTERM,
-		TERMINATING
+		TP_STARTING,
+		TP_WORKING,
+		TP_IDLE,
+		TP_SIGTERM,
+		TP_TERMINATING
 	}; // end enum THREAD_SIGNALS
 
 	// Disallow any kind of copy/move operation on thread pools
@@ -62,9 +62,9 @@ public:
 		// signal all threads to terminate
 		m_mtx_signals.lock();
 		std::for_each(m_vect_signals.begin(), m_vect_signals.end(),
-			[&](auto& sigterm)
+			[&](auto& thread_signal)
 			{
-				sigterm = THREAD_SIGNALS::SIGTERM;
+				thread_signal = THREAD_SIGNALS::TP_SIGTERM;
 			} // end lambda
 		); // end foreach
 		m_mtx_signals.unlock();
@@ -128,8 +128,9 @@ public:
 			m_mtx_signals.lock();
 			for (auto i = mu_li_nrunning; i < mu_li_nthreads; i++)
 			{
-				m_vect_signals.push_back(THREAD_SIGNALS::STARTING);
-				m_vect_threads.push_back(std::thread([&](void) {idle_thread(i); }));
+				std::size_t my_id = i;
+				m_vect_signals.push_back(THREAD_SIGNALS::TP_STARTING);
+				m_vect_threads.push_back(std::thread([this, my_id](void) {idle_thread(my_id); }));
 			} // end for i
 
 			mu_li_nrunning = m_vect_threads.size();
@@ -170,9 +171,9 @@ public:
 		// signal all threads to terminate
 		m_mtx_signals.lock();
 		std::for_each(m_vect_signals.begin(), m_vect_signals.end(),
-			[&](auto& sigterm)
+			[&](auto& thread_signal)
 			{
-				sigterm = THREAD_SIGNALS::SIGTERM;
+				thread_signal = THREAD_SIGNALS::TP_SIGTERM;
 			} // end lambda
 		); // end foreach
 		m_mtx_signals.unlock();
@@ -229,7 +230,7 @@ public:
 		// wait for all threads to complete their current work
 		for (auto& _signal : m_vect_signals)
 		{
-			while (_signal == THREAD_SIGNALS::WORKING)
+			while (_signal == THREAD_SIGNALS::TP_WORKING)
 			{
 				std::this_thread::yield();
 			} // end while
@@ -255,7 +256,7 @@ public:
 	///<returns>The number of jobs that remain in the queue.</returns>
 	std::size_t N_Jobs_Remaining(void) const noexcept
 	{
-		Guard_t guard(m_q_tasks);
+		Guard_t guard(m_mtx_tasks);
 
 		return m_q_tasks.size();
 	} // end method N_Jobs_Remaining
@@ -277,11 +278,11 @@ public:
 	/// Returns a list of all threads and their current states at the time of invocation.
 	///</summary>
 	///<returns>A vector of all thread states.</returns>
-	std::vector<THREAD_SIGNALS> Thread_States(void) const
+	std::vector<int> Thread_States(void) const
 	{
 		Guard_t guard(m_mtx_signals);
 
-		return std::vector<THREAD_SIGNALS>(m_vect_signals);
+		return std::vector<int>(m_vect_signals);
 	} // end method Thread_States
 
 
@@ -322,16 +323,22 @@ protected:
 			{
 				fn_job();
 			} // end try
+			catch (const std::exception& e)
+			{
+				Guard_t guard(m_mtx_exception);
+				std::cerr << "[Thread " << ku_li_MY_ID_ << "]: An exception occurred while executing a job." << std::endl;
+				std::cerr << e.what() << std::endl;
+			}
 			catch (...) // catch any kind of exception and alert the user
 			{
 				Guard_t guard(m_mtx_exception);
-				std::cerr << "[Thread Pool]: An exception occurred while executing a job." << std::endl;
-				m_q_exception.push(std::current_exception);
+				std::cerr << "[Thread " << ku_li_MY_ID_ << "]: An exception occurred while executing a job." << std::endl;
+				m_q_exception.push(std::current_exception());
 			} // end catch all
 
 			switch (m_vect_signals.at(ku_li_MY_ID_))
 			{
-			case THREAD_SIGNALS::SIGTERM:
+			case THREAD_SIGNALS::TP_SIGTERM:
 				b_run = false;
 				break;
 			default:
@@ -341,7 +348,7 @@ protected:
 
 		{
 			Guard_t guard(m_mtx_signals);
-			m_vect_signals.at(ku_li_MY_ID_) = THREAD_SIGNALS::TERMINATING;
+			m_vect_signals.at(ku_li_MY_ID_) = THREAD_SIGNALS::TP_TERMINATING;
 		}
 	} // end idle_thread
 
@@ -364,9 +371,9 @@ protected:
 			m_q_tasks.pop();
 
 			Guard_t guard(m_mtx_signals);
-			if (m_vect_signals[ku_li_MY_ID_] != THREAD_SIGNALS::SIGTERM)
+			if (m_vect_signals[ku_li_MY_ID_] != THREAD_SIGNALS::TP_SIGTERM)
 			{
-				m_vect_signals[ku_li_MY_ID_] = THREAD_SIGNALS::WORKING;
+				m_vect_signals[ku_li_MY_ID_] = THREAD_SIGNALS::TP_WORKING;
 			} // end if
 		} // end if
 		else
@@ -374,9 +381,9 @@ protected:
 			job = std::this_thread::yield;
 
 			Guard_t guard(m_mtx_signals);
-			if (m_vect_signals[ku_li_MY_ID_] != THREAD_SIGNALS::SIGTERM)
+			if (m_vect_signals[ku_li_MY_ID_] != THREAD_SIGNALS::TP_SIGTERM)
 			{
-				m_vect_signals[ku_li_MY_ID_] = THREAD_SIGNALS::IDLE;
+				m_vect_signals[ku_li_MY_ID_] = THREAD_SIGNALS::TP_IDLE;
 			} // end if
 		} // end else
 
