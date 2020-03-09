@@ -2,9 +2,9 @@
 #include <type_traits>
 #include <iterator>
 #include <future>
-#include "Job.hpp"
-#include "ThreadPool_v2.hpp"
 #include <mutex>
+
+#include "ThreadPool.hpp"
 
 std::mutex cout_mtx;
 
